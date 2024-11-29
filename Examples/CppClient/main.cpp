@@ -6,6 +6,7 @@
 #include <thread>
 #include <tuple>
 
+// 引入CARLA客户端库的头文件
 #include <carla/client/ActorBlueprint.h>
 #include <carla/client/BlueprintLibrary.h>
 #include <carla/client/Client.h>
@@ -18,19 +19,23 @@
 #include <carla/image/ImageView.h>
 #include <carla/sensor/data/Image.h>
 
+// 为CARLA命名空间创建别名，简化代码
 namespace cc = carla::client;
 namespace cg = carla::geom;
 namespace csd = carla::sensor::data;
 
+// 使用std命名空间中的chrono和string字面量
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
+// 定义一个宏，用于断言表达式为真，否则抛出运行时错误
 #define EXPECT_TRUE(pred) if (!(pred)) { throw std::runtime_error(#pred); }
 
+/// 从给定范围中随机选择一个元素
 /// Pick a random element from @a range.
 template <typename RangeT, typename RNG>
 static auto &RandomChoice(const RangeT &range, RNG &&generator) {
-  EXPECT_TRUE(range.size() > 0u);
+  EXPECT_TRUE(range.size() > 0u);  // 断言值一定大于0，否则就抛出异常
   std::uniform_int_distribution<size_t> dist{0u, range.size() - 1u};
   return range[dist(std::forward<RNG>(generator))];
 }
@@ -51,9 +56,11 @@ static void SaveSemSegImageToDisk(const csd::Image &image) {
 }
 */
 
+// 解析命令行参数，返回主机名和端口号
 static auto ParseArguments(int argc, const char *argv[]) {
-  EXPECT_TRUE((argc == 1u) || (argc == 3u));
+  EXPECT_TRUE((argc == 1u) || (argc == 3u));  // 断言argc的值要么是1要么是3，否则就抛出异常
   using ResultType = std::tuple<std::string, uint16_t>;
+  // 根据参数数量返回不同的结果
   return argc == 3u ?
       ResultType{argv[1u], std::stoi(argv[2u])} :
       ResultType{"localhost", 2000u};
@@ -61,30 +68,33 @@ static auto ParseArguments(int argc, const char *argv[]) {
 
 int main(int argc, const char *argv[]) {
   try {
-
+    // 解析命令行参数
     std::string host;
     uint16_t port;
     std::tie(host, port) = ParseArguments(argc, argv);
-
+    
+    // 初始化随机数生成器
     std::mt19937_64 rng((std::random_device())());
 
+    // 创建CARLA客户端
     auto client = cc::Client(host, port);
     client.SetTimeout(40s);
-
+    
+    // 打印客户端和服务器API版本
     std::cout << "Client API version : " << client.GetClientVersion() << '\n';
     std::cout << "Server API version : " << client.GetServerVersion() << '\n';
 
-    // Load a random town.
+    // 随机加载一个城镇位置
     auto town_name = RandomChoice(client.GetAvailableMaps(), rng);
     std::cout << "Loading world: " << town_name << std::endl;
     auto world = client.LoadWorld(town_name);
 
-    // Get a random vehicle blueprint.
+    // 随机获取一个交通工具蓝图
     auto blueprint_library = world.GetBlueprintLibrary();
     auto vehicles = blueprint_library->Filter("vehicle");
     auto blueprint = RandomChoice(*vehicles, rng);
 
-    // Randomize the blueprint.
+    // 随机选取一个蓝图
     if (blueprint.ContainsAttribute("color")) {
       auto &attribute = blueprint.GetAttribute("color");
       blueprint.SetAttribute(
@@ -92,21 +102,21 @@ int main(int argc, const char *argv[]) {
           RandomChoice(attribute.GetRecommendedValues(), rng));
     }
 
-    // Find a valid spawn point.
+    // 随机选择一个推荐的出生点
     auto map = world.GetMap();
     auto transform = RandomChoice(map->GetRecommendedSpawnPoints(), rng);
 
-    // Spawn the vehicle.
+    // 在世界中生成车辆
     auto actor = world.SpawnActor(blueprint, transform);
     std::cout << "Spawned " << actor->GetDisplayId() << '\n';
     auto vehicle = boost::static_pointer_cast<cc::Vehicle>(actor);
 
-    // Apply control to vehicle.
+    // 应用控制到车辆上，例如设置油门
     cc::Vehicle::Control control;
     control.throttle = 1.0f;
     vehicle->ApplyControl(control);
 
-    // Move spectator so we can see the vehicle from the simulator window.
+    // 调整观察者位置以便在模拟器窗口中看到车辆
     auto spectator = world.GetSpectator();
     transform.location += 32.0f * transform.GetForwardVector();
     transform.location.z += 2.0f;
@@ -138,13 +148,16 @@ int main(int argc, const char *argv[]) {
     // Remove actors from the simulation.
     camera->Destroy();
 */
+    // 销毁车辆
     vehicle->Destroy();
     std::cout << "Actors destroyed." << std::endl;
 
   } catch (const cc::TimeoutException &e) {
+    // 捕获超时异常并打印
     std::cout << '\n' << e.what() << std::endl;
     return 1;
   } catch (const std::exception &e) {
+    // 捕获其他异常并打印
     std::cout << "\nException: " << e.what() << std::endl;
     return 2;
   }

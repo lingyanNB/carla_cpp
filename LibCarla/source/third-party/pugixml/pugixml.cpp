@@ -985,16 +985,17 @@ PUGI__NS_BEGIN
 	// 定义一个模板类compact_pointer_parent，它可能是compact_pointer的基类或用于提供某些共享功能
 	template <typename T, int header_offset> class compact_pointer_parent
 	{
+	// 类的构造函数，初始化成员变量_data为0
 	public:
 		compact_pointer_parent(): _data(0)
 		{
 		}
-
+		// 拷贝赋值操作符
 		void operator=(const compact_pointer_parent& rhs)
 		{
 			*this = rhs + 0;
 		}
-
+		// 赋值操作符重载，接受一个T*类型的参数
 		void operator=(T* value)
 		{
 			if (value)
@@ -1003,26 +1004,30 @@ PUGI__NS_BEGIN
 				// our decoding is based on 'this' aligned to compact alignment downwards (see operator T*)
 				// so for negative offsets (e.g. -3) we need to adjust the diff by compact_alignment - 1 to
 				// compensate for arithmetic shift behavior for negative values
+				// 将value和this指针转换为char*，然后计算它们之间的差值diff
 				ptrdiff_t diff = reinterpret_cast<char*>(value) - reinterpret_cast<char*>(this);
 				ptrdiff_t offset = ((diff + int(compact_alignment - 1)) >> compact_alignment_log2) + 65533;
-
+				// 如果计算出的offset在可存储范围内（即小于或等于65533），则直接存储为_data的值（加1是为了留出0表示null的特殊情况）
 				if (static_cast<uintptr_t>(offset) <= 65533)
 				{
 					_data = static_cast<unsigned short>(offset + 1);
 				}
 				else
 				{
+					// 如果offset超出范围，则需要使用更复杂的内存管理机制
+					// 首先，获取与this相关的内存页
 					xml_memory_page* page = compact_get_page(this, header_offset);
-
+					// 如果该页还没有共享父指针，则设置它
 					if (PUGI__UNLIKELY(page->compact_shared_parent == 0))
 						page->compact_shared_parent = value;
-
+					// 如果共享父指针已经是value，则使用特殊值65534表示
 					if (page->compact_shared_parent == value)
 					{
 						_data = 65534;
 					}
 					else
-					{
+					{\
+						// 否则，使用某种机制将value存储到内存页中，并将_data设置为特殊值65535
 						compact_set_value<header_offset>(this, value);
 
 						_data = 65535;
@@ -1031,31 +1036,38 @@ PUGI__NS_BEGIN
 			}
 			else
 			{
+				// 如果value为nullptr，则将_data设置为0，表示null指针
 				_data = 0;
 			}
 		}
 
 		operator T*() const
 		{
-			if (_data)
+			if (_data)// 如果_data非零
 			{
-				if (_data < 65534)
+				if (_data < 65534)// 如果_data的值小于65534
 				{
+					// 调整当前对象的地址，使其符合compact_alignment对齐要求
 					uintptr_t base = reinterpret_cast<uintptr_t>(this) & ~(compact_alignment - 1);
-
+					// 根据_data的值计算实际存储T类型数据的地址，并返回该地址
+					// 这里假设了一个特殊的存储策略，其中65533作为偏移量的基准点
 					return reinterpret_cast<T*>(base + (_data - 1 - 65533) * compact_alignment);
 				}
-				else if (_data == 65534)
+				else if (_data == 65534)// 如果_data的值等于65534
+					// 调用compact_get_page函数获取一个特定的页面，并返回该页面中compact_shared_parent指向的T类型数据的地址
 					return static_cast<T*>(compact_get_page(this, header_offset)->compact_shared_parent);
-				else
+				else// 如果_data的值大于65534
+					// 调用compact_get_value函数，根据_data的值和header_offset获取并返回T类型数据的地址
 					return compact_get_value<header_offset, T>(this);
 			}
-			else
+			else// 如果_data为零
+				// 返回空指针，表示没有有效的T类型数据
 				return 0;
 		}
 
 		T* operator->() const
 		{
+			// 返回当前对象转换为T*的结果，允许通过->操作符访问T类型对象的成员
 			return *this;
 		}
 
@@ -1079,48 +1091,56 @@ PUGI__NS_BEGIN
 		{
 			if (value)
 			{
+				// 获取与当前对象关联的内存页面
 				xml_memory_page* page = compact_get_page(this, header_offset);
-
+				// 如果compact_string_base为0（即尚未初始化或没有存储任何字符串），则将其设置为value
 				if (PUGI__UNLIKELY(page->compact_string_base == 0))
 					page->compact_string_base = value;
-
+				// 计算value相对于compact_string_base的偏移量
 				ptrdiff_t offset = value - page->compact_string_base;
-
+				// 如果偏移量小于65535 * 128（即小于16位带符号整数能表示的最大正偏移量，但这里实际上只使用了15位加上一个标志位）
 				if (static_cast<uintptr_t>(offset) < (65535 << 7))
 				{
 					// round-trip through void* to silence 'cast increases required alignment of target type' warnings
 					uint16_t* base = reinterpret_cast<uint16_t*>(static_cast<void*>(reinterpret_cast<char*>(this) - base_offset));
-
+					// 如果base指向的值为0（即尚未存储任何偏移量）
 					if (*base == 0)
 					{
+						// 存储偏移量（右移7位以适应15位的存储，并加1作为标志）到base指向的位置
+						// 同时，将偏移量的低7位（加1作为标志）存储到_data中
 						*base = static_cast<uint16_t>((offset >> 7) + 1);
 						_data = static_cast<unsigned char>((offset & 127) + 1);
 					}
 					else
 					{
+						// 如果已经存储了一个偏移量，则计算新的偏移量是否仍然可以用当前的方式存储
 						ptrdiff_t remainder = offset - ((*base - 1) << 7);
-
+						// 如果新的偏移量的低7位（加1后）小于等于253（即实际偏移量小于等于252，因为加1作为标志）
 						if (static_cast<uintptr_t>(remainder) <= 253)
 						{
+							// 更新_data以存储新的低7位偏移量（加1作为标志）
 							_data = static_cast<unsigned char>(remainder + 1);
 						}
 						else
 						{
+							// 如果新的偏移量太大，无法用当前的方式存储，则使用另一种存储方法（可能是动态分配）
 							compact_set_value<header_offset>(this, value);
-
+							// 设置_data为255，作为使用特殊存储方法的标志
 							_data = 255;
 						}
 					}
 				}
 				else
 				{
+					// 如果偏移量太大，无法用当前的方式存储，则同样使用另一种存储方法
 					compact_set_value<header_offset>(this, value);
-
+					// 设置_data为255，作为使用特殊存储方法的标志
 					_data = 255;
 				}
 			}
 			else
 			{
+				// 如果提供的值为空，则将_data设置为0，表示没有存储任何值
 				_data = 0;
 			}
 		}
